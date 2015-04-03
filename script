@@ -62,22 +62,13 @@ if(lastRecordEntry = lastRecord.find_one)
   recordNumber = lastRecordEntry['n']
 end
 
-# puts dateEnd
-# puts recordNumber
-
-
-# TODO: perform db refresh only when necessary, and only for the records required.  Also learn mongo update 
-# refresh db
+# get the data
 httpContent       = open("http://ichart.finance.yahoo.com/table.csv?s=#{indexSymbolHttp}&a=#{dateEnd.month-1}&b=#{dateEnd.day}&c=#{dateEnd.year}&d=#{dateNow.month-1}&e=#{dateNow.day}&f=#{dateNow.year}&g=d&ignore=.csv") {|io| io.read}
 
-# puts httpContent
-
 # read csv httpContent
-# puts 'update records...'
 firstNewRecordN = nil
 httpContent.split(/\n/).reverse.each do |line|
   next if line =~ /^[,\w\s]+$/
-#   puts "  #{line}"
   date, open, high, low, close, volume, adjClose = line.split(/,/)
   year,month,day = date.split(/-/)
   date = "#{year}#{month}#{day}"
@@ -96,12 +87,9 @@ httpContent.split(/\n/).reverse.each do |line|
   }
   next unless lineDoc[:volume] > 0
   recordNumber+=1
-#   puts "  #{lineDoc}"
-#   puts records.find_one({:n=>lineDoc[:n],:date=>lineDoc[:date]}).reject{|k,v|k=='_id'}
   records.update({:n=>lineDoc[:n],:date=>lineDoc[:date]},lineDoc,{:upsert=>true})
   firstNewRecordN = firstNewRecordN || lineDoc[:n]
 end
-# puts recordNumber
 lastRecord.drop
 lastRecord.insert(records.find_one(:n=>recordNumber-1).reject{|k,v|k=='_id'},{:upsert=>true})
 
@@ -138,7 +126,6 @@ records.find({:n=>{'$gte'=>firstNewRecordN}}).sort(:n).each do |record|
   metrics.update({:n=>metric[:n],:date=>metric[:date]},metric,{:upsert=>true})
 end
 metrics.find({:n=>{'$gte'=>firstNewRecordN}}).sort(:n).each do |metric|
-  # metrics.find().sort(:n).each do |metric|
   next unless previousMetric = metrics.find_one(:n=>metric['n']-1)
   consolidation  = {
     :n             => metric['n'],
@@ -146,7 +133,6 @@ metrics.find({:n=>{'$gte'=>firstNewRecordN}}).sort(:n).each do |metric|
     :rally         => (metric['deltaClose'] > 0  ||  metric['closingPriceAsPercentOfIntradayRange'] >= 50),
     :followThrough => (metric['deltaVolume'] > 0  and  metric['deltaClose'] > 0  and  metric['deltaCloseAsPercent'] >  1),
   }
-  # puts consolidation
   next unless consolidation[:rally] || consolidation[:followThrough]
   consolidations.update({:n=>consolidation[:n],:date=>consolidation[:date]},consolidation,{:upsert=>true})
 end
@@ -166,25 +152,17 @@ metrics.find({:n=>{'$gte'=>firstNewRecordN}}).sort(:n).each do |metric|
     distribution[:signal] = true
     distributions.update({:n=>distribution[:n],:date=>distribution[:date]},distribution,{:upsert=>true})
   end
-  # puts distribution
 end
 metrics.find({:n=>{'$gte'=>firstNewRecordN}}).sort(:n).each do |metric|
-  # metrics.find({:date=>{'$gte'=>20130400}}).sort(:n).each do |metric|
-#   metrics.find().sort(:n).each do |metric|
   next unless metric['n'] > 26
-#   puts "\n#{metric['date']} #{metric['n']} "
   previousMetrics = metrics.find(:n=>{'$gt'=>metric['n']-25, '$lte'=>metric['n']}).sort(:n).to_a
   distributionSignals = []
   previousMetrics.each do |previousMetric|
-#     puts "#{previousMetric['n']} #{previousMetric['date']}"
     previousDistribution  = distributions.find_one(:n=>previousMetric['n'])
-#     puts previousDistribution
     distributionSignals.push(previousDistribution) if previousDistribution and previousDistribution['signal']
     previousConsolidation = consolidations.find_one(:n=>previousMetric['n'])
     if previousConsolidation and previousConsolidation['followThrough']
-#       puts previousConsolidation
       distributionSignals = [] 
-#       puts distributionSignals
     end
   end
   distributionSignals20 = distributionSignals.reject{|k,v|k['n']<=metric['n']-20}
@@ -199,7 +177,6 @@ metrics.find({:n=>{'$gte'=>firstNewRecordN}}).sort(:n).each do |metric|
   elsif distributionCount25 >= 3  # yellow
     flagValue = -1 
   end
-#   puts "  #{distributionCount25} #{distributionCount20} #{flagValue} #{metric['n']}"
   flag = {
     :n      => metric['n'],
     :date   => metric['date'],
@@ -207,7 +184,6 @@ metrics.find({:n=>{'$gte'=>firstNewRecordN}}).sort(:n).each do |metric|
     :data   => []
   }
   distributionSignals.each do |distributionSignal|
-    # puts distributionSignal
     if(distributionSignal['signal'])
       flag[:data].unshift(
         :n     => distributionSignal['n'],
@@ -246,7 +222,6 @@ queries = [
 
 ]
 query = queries[0]
-# puts query
 metrics.find(query).sort(:n).each do |metric|
   string = "#{metric['date']} "
   consolidation = consolidations.find_one(:n=>metric['n'])
@@ -284,8 +259,6 @@ metrics.find(query).sort(:n).each do |metric|
     string += " #{flagString.colorize( :color => :black, :background => backgroundColor )}"
     flag['data'].each do |distribution|
       distributionTypes = distribution['types'].map{|s|s.to_s[0].upcase}
-#       distributionTypes.push(' ') until distributionTypes.count == 3
-#       puts "#{distributionTypes.count}"
       string += "  #{distribution['date']} #{distributionTypes.join('')}"
     end
   end
